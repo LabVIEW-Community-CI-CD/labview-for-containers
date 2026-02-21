@@ -9,14 +9,12 @@ param(
         'mcr.microsoft.com/windows/server:ltsc2022'
     ),
     [string[]]$KeepVolumes = @(
-        'vm',
-        'vm-p3363-20260220-170629'
+        'vm'
     ),
     [string[]]$KeepLogPrefixes = @(
         'p3363-',
         'cleanup-manifest-',
-        'ppl-phase3-20260220-162845',
-        'ppl-phase3-20260220-163256'
+        'ppl-phase3-'
     )
 )
 

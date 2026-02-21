@@ -27,20 +27,30 @@ runs:
     - name: Runner sanity
       if: ${{ inputs.runner_sanity == 'true' }}
       shell: pwsh
+      env:
+        INPUT_ENFORCE_HOST_CONTRACT: ${{ inputs.enforce_host_contract }}
+        INPUT_HOST_CONTRACT_PATH: ${{ inputs.host_contract_path }}
+        INPUT_REQUIRED_LABVIEW_YEARS: ${{ inputs.required_labview_years }}
+        INPUT_REQUIRED_CLI_MAJOR: ${{ inputs.required_cli_major }}
       run: |
         $scriptPath = Join-Path $env:GITHUB_WORKSPACE 'Tooling\Check-Runner.ps1'
         if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
           throw "Check-Runner.ps1 not found at $scriptPath"
         }
 
+        $hostContractPath = $env:INPUT_HOST_CONTRACT_PATH
+        if ([string]::IsNullOrWhiteSpace($hostContractPath)) {
+          $hostContractPath = 'Tooling/runner-host-contract.json'
+        }
+
         $args = @(
           '-NoProfile',
           '-File', $scriptPath,
           '-RepoRoot', $env:GITHUB_WORKSPACE,
-          '-HostContractPath', '${{ inputs.host_contract_path }}'
+          '-HostContractPath', $hostContractPath
         )
 
-        $enforceInput = '${{ inputs.enforce_host_contract }}'.Trim().ToLowerInvariant()
+        $enforceInput = if ($null -eq $env:INPUT_ENFORCE_HOST_CONTRACT) { '' } else { $env:INPUT_ENFORCE_HOST_CONTRACT.Trim().ToLowerInvariant() }
         $enforceFromEnv = if (Test-Path 'Env:LVIE_ENFORCE_DEDICATED_HOST_CONTRACT') {
           $env:LVIE_ENFORCE_DEDICATED_HOST_CONTRACT.Trim().ToLowerInvariant()
         } else {
@@ -50,7 +60,7 @@ runs:
           $args += '-EnforceHostContract'
         }
 
-        $requiredYears = '${{ inputs.required_labview_years }}'
+        $requiredYears = $env:INPUT_REQUIRED_LABVIEW_YEARS
         if ([string]::IsNullOrWhiteSpace($requiredYears)) {
           $requiredYears = $env:LVIE_REQUIRED_LABVIEW_YEARS
         }
@@ -58,7 +68,7 @@ runs:
           $args += @('-RequiredLabVIEWYears', $requiredYears)
         }
 
-        $requiredCliMajor = '${{ inputs.required_cli_major }}'
+        $requiredCliMajor = $env:INPUT_REQUIRED_CLI_MAJOR
         if ([string]::IsNullOrWhiteSpace($requiredCliMajor)) {
           $requiredCliMajor = $env:LVIE_REQUIRED_CLI_MAJOR
         }

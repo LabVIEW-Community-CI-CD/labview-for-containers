@@ -20,8 +20,13 @@ jobs:
 
       - name: Fetch NI upstream
         run: |
+          set -euo pipefail
           git remote add upstream https://github.com/ni/labview-for-containers.git || true
           git fetch upstream main --prune
+          if ! git cat-file -e upstream/main:docs/windows-custom-images.md 2>/dev/null; then
+            echo "Expected upstream doc not found at upstream/main:docs/windows-custom-images.md"
+            exit 1
+          fi
 
       - name: Generate drift report
         id: drift
@@ -44,6 +49,8 @@ jobs:
           }
 
           local_doc = Path("docs/windows-custom-images.md")
+          if not local_doc.exists():
+              raise RuntimeError("Local doc missing: docs/windows-custom-images.md")
           upstream_doc = Path("builds/status/upstream-windows-custom-images.md")
           upstream_doc.write_text(
               subprocess.check_output(

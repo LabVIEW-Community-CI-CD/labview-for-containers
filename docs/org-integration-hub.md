@@ -40,4 +40,6 @@ Sandbox/incubation work remains:
 - Stabilize 2026 first using hosted certification evidence.
 - Keep canonical 2020 promotion frozen until promotion gate criteria are met in
   a qualified environment lane.
-
+- Align 2026 execution with NI `v2026q1` release notes:
+  - Windows container support is official.
+  - Headless mode is the expected automation mode (`LabVIEWCLI ... -Headless`).

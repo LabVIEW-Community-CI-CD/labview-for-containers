@@ -433,6 +433,8 @@ Profile note:
 - `2020-x64-stabilization` enforces listener readiness (`port_listening_before_cli=true`).
 - `2026-x64-throughput` evaluates pass primarily from CLI outcome metrics
   (`final_exit_code=0`, no `-350000`) and records listener status as evidence.
+- Host-native port contract (`Tooling/labviewcli-port-contract.json`) is a
+  separate control surface from container image-contract profiles.
 
 Comparison procedure (triage discipline):
 
