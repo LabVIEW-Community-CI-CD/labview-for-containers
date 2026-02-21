@@ -2,7 +2,7 @@
 param(
     [string]$ImageTag = 'labview-custom-windows:2020q1-windows-phase2',
     [string]$IconEditorRepoRoot = '',
-    [string]$LvYear = '2020',
+    [ValidatePattern('^\d{4}$')][string]$LvYear = '2020',
     [ValidateSet('3363')][string]$LvCliPort = '3363',
     [string]$BuildSpecName = 'Editor Packed Library',
     [string]$OutputRelativePath = 'resource/plugins/lv_icon.lvlibp',
@@ -19,6 +19,12 @@ if ([string]::IsNullOrWhiteSpace($LvCliPort)) {
     $LvCliPort = '3363'
 }
 $LvCliPort = $LvCliPort.Trim()
+
+function Escape-SingleQuotedString {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    return ($Value -replace "'", "''")
+}
 
 function Invoke-DockerCommand {
     param(
@@ -311,10 +317,14 @@ if (Test-Path -LiteralPath $lvIni -PathType Leaf) { Copy-Item -LiteralPath $lvIn
 if (Test-Path -LiteralPath $cliIni -PathType Leaf) { Copy-Item -LiteralPath $cliIni -Destination (Join-Path $diagRoot 'LabVIEWCLI.ini') -Force }
 '@
 
-$configureCmd = $configureCmdTemplate.Replace('__LV_YEAR__', $LvYear).Replace('__LV_PORT__', $LvCliPort)
-$massCompileCmd = $massCompileCmdTemplate.Replace('__LV_YEAR__', $LvYear).Replace('__LV_PORT__', $LvCliPort)
-$buildSpecCmd = $buildSpecCmdTemplate.Replace('__LV_YEAR__', $LvYear).Replace('__LV_PORT__', $LvCliPort).Replace('__BUILD_SPEC__', $BuildSpecName).Replace('__OUTPUT_REL__', $outputRelativeNormalized)
-$diagnosticsCmd = $diagnosticsCmdTemplate.Replace('__LV_YEAR__', $LvYear).Replace('__LV_PORT__', $LvCliPort)
+$escapedLvYear = Escape-SingleQuotedString -Value $LvYear
+$escapedBuildSpecName = Escape-SingleQuotedString -Value $BuildSpecName
+$escapedOutputRelativePath = Escape-SingleQuotedString -Value $outputRelativeNormalized
+
+$configureCmd = $configureCmdTemplate.Replace('__LV_YEAR__', $escapedLvYear).Replace('__LV_PORT__', $LvCliPort)
+$massCompileCmd = $massCompileCmdTemplate.Replace('__LV_YEAR__', $escapedLvYear).Replace('__LV_PORT__', $LvCliPort)
+$buildSpecCmd = $buildSpecCmdTemplate.Replace('__LV_YEAR__', $escapedLvYear).Replace('__LV_PORT__', $LvCliPort).Replace('__BUILD_SPEC__', $escapedBuildSpecName).Replace('__OUTPUT_REL__', $escapedOutputRelativePath)
+$diagnosticsCmd = $diagnosticsCmdTemplate.Replace('__LV_YEAR__', $escapedLvYear).Replace('__LV_PORT__', $LvCliPort)
 
 try {
     $failedOperation = 'start-container'

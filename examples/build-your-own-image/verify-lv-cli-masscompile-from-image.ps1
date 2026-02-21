@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$ImageTag = 'labview-custom-windows:2020q1-windows-p3363-candidate',
-    [string]$LvYear = '2020',
+    [ValidatePattern('^\d{4}$')][string]$LvYear = '2020',
     [ValidateSet('3363')][string]$LvCliPort = '3363',
     [string]$DirectoryToCompile = '',
     [int]$WarmupSeconds = 60,
@@ -15,6 +15,12 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Escape-SingleQuotedString {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    return ($Value -replace "'", "''")
+}
 
 function Invoke-DockerCommand {
     param(
@@ -300,10 +306,13 @@ foreach ($root in $roots) {
 exit 0
 '@
 
-$iniCheckCmd = $iniCheckTemplate.Replace('__PORT__', $LvCliPort).Replace('__YEAR__', $LvYear)
-$readinessCmd = $readinessTemplate.Replace('__PORT__', $LvCliPort).Replace('__YEAR__', $LvYear).Replace('__WARMUP__', [string]$WarmupSeconds).Replace('__TIMEOUT__', [string]$ListenPollTimeoutSeconds)
-$massCompileCmd = $massCompileTemplate.Replace('__PORT__', $LvCliPort).Replace('__YEAR__', $LvYear).Replace('__DIR__', ($DirectoryToCompile -replace "'", "''"))
-$diagnosticsCmd = $diagnosticsTemplate.Replace('__PORT__', $LvCliPort).Replace('__YEAR__', $LvYear)
+$escapedLvYear = Escape-SingleQuotedString -Value $LvYear
+$escapedDirectoryToCompile = Escape-SingleQuotedString -Value $DirectoryToCompile
+
+$iniCheckCmd = $iniCheckTemplate.Replace('__PORT__', $LvCliPort).Replace('__YEAR__', $escapedLvYear)
+$readinessCmd = $readinessTemplate.Replace('__PORT__', $LvCliPort).Replace('__YEAR__', $escapedLvYear).Replace('__WARMUP__', [string]$WarmupSeconds).Replace('__TIMEOUT__', [string]$ListenPollTimeoutSeconds)
+$massCompileCmd = $massCompileTemplate.Replace('__PORT__', $LvCliPort).Replace('__YEAR__', $escapedLvYear).Replace('__DIR__', $escapedDirectoryToCompile)
+$diagnosticsCmd = $diagnosticsTemplate.Replace('__PORT__', $LvCliPort).Replace('__YEAR__', $escapedLvYear)
 
 try {
     $dockerRunLogPath = Join-Path $runLogRoot 'docker-run.log'
