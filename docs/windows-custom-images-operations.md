@@ -438,7 +438,8 @@ Profile note:
 
 Comparison procedure (triage discipline):
 
-1. Open previous failing references (`22262096511`, `22262277660`, `22262448572`).
+1. Open previous failing certification runs for the same branch and profile in
+   your CI system.
 1. Compare classification and verifier metrics against latest
    `image-contract-cert-summary-*.json`.
 1. Confirm whether failure is `port_not_listening`, `cli_connect_fail`, or

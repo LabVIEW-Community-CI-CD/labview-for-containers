@@ -2,6 +2,12 @@ name: Governance Audit
 
 on:
   workflow_dispatch:
+    inputs:
+      bootstrap_mode:
+        description: Allow required-check gaps during initial repository bootstrap.
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "30 6 * * 1"
 
@@ -19,11 +25,13 @@ jobs:
       - name: Audit governance policy
         env:
           GH_TOKEN: ${{ github.token }}
+          BOOTSTRAP_MODE: ${{ inputs.bootstrap_mode }}
         shell: bash
         run: |
           set -euo pipefail
           repo="${{ github.repository }}"
           failures=0
+          bootstrap_mode="$(echo "${BOOTSTRAP_MODE:-false}" | tr '[:upper:]' '[:lower:]')"
 
           has_issues="$(gh api "repos/$repo" --jq '.has_issues')"
           if [[ "$has_issues" != "true" ]]; then
@@ -45,8 +53,12 @@ jobs:
           )
           for check in "${required_checks[@]}"; do
             if ! echo "$protection_json" | jq -e --arg c "$check" '.required_status_checks.contexts | index($c)' > /dev/null; then
-              echo "FAIL: required check missing from branch protection: $check"
-              failures=$((failures + 1))
+              if [[ "$bootstrap_mode" == "true" ]]; then
+                echo "WARN: required check missing during bootstrap mode: $check"
+              else
+                echo "FAIL: required check missing from branch protection: $check"
+                failures=$((failures + 1))
+              fi
             fi
           done
 
@@ -84,6 +96,7 @@ jobs:
             echo "### Governance Audit"
             echo ""
             echo "- Repository: \`$repo\`"
+            echo "- Bootstrap mode: \`$bootstrap_mode\`"
             echo "- Issues enabled: \`$has_issues\`"
             echo "- Strict checks on main: \`$strict\`"
             echo "- Failures: \`$failures\`"

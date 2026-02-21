@@ -13,7 +13,6 @@ param(
     ),
     [string[]]$KeepLogPrefixes = @(
         'p3363-',
-        'cleanup-manifest-',
         'ppl-phase3-'
     )
 )
@@ -124,7 +123,12 @@ $exitedContainers = Get-ExitedContainers
 $missingKeepTags = @($KeepImageTags | Where-Object { $allImageTags -notcontains $_ })
 $missingKeepTagCount = @($missingKeepTags).Count
 if ($missingKeepTagCount -gt 0) {
-    throw ("Missing required keep image tags: {0}" -f ($missingKeepTags -join ', '))
+    $missingKeepMessage = ("Missing keep image tags in current Docker state: {0}" -f ($missingKeepTags -join ', '))
+    if ($Apply.IsPresent) {
+        throw $missingKeepMessage
+    }
+
+    Write-Warning ($missingKeepMessage + '. Continuing in dry-run mode.')
 }
 
 $removeImageTags = @()

@@ -2,7 +2,7 @@
 param(
     [string]$ImageTag = 'labview-custom-windows:2020q1-windows-p3363-candidate',
     [string]$LvYear = '2020',
-    [string]$LvCliPort = '3363',
+    [ValidateSet('3363')][string]$LvCliPort = '3363',
     [string]$DirectoryToCompile = '',
     [int]$WarmupSeconds = 60,
     [int]$ListenPollTimeoutSeconds = 180,
@@ -122,9 +122,6 @@ if ($MaxCliAttempts -lt 1) {
     throw 'MaxCliAttempts must be >= 1.'
 }
 $LvCliPort = $LvCliPort.Trim()
-if ($LvCliPort -ne '3363') {
-    throw "LvCliPort must be '3363'. Received: '$LvCliPort'"
-}
 $LvYear = $LvYear.Trim()
 if ([string]::IsNullOrWhiteSpace($LvYear)) {
     throw 'LvYear must not be empty.'

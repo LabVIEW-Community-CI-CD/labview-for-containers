@@ -3,7 +3,7 @@ param(
     [string]$ImageTag = 'labview-custom-windows:2020q1-windows-phase2',
     [string]$IconEditorRepoRoot = '',
     [string]$LvYear = '2020',
-    [string]$LvCliPort = '3363',
+    [ValidateSet('3363')][string]$LvCliPort = '3363',
     [string]$BuildSpecName = 'Editor Packed Library',
     [string]$OutputRelativePath = 'resource/plugins/lv_icon.lvlibp',
     [switch]$KeepContainer,
@@ -19,9 +19,6 @@ if ([string]::IsNullOrWhiteSpace($LvCliPort)) {
     $LvCliPort = '3363'
 }
 $LvCliPort = $LvCliPort.Trim()
-if ($LvCliPort -ne '3363') {
-    throw "LvCliPort must be set to '3363' for the lv2020x64 Phase 3 path. Received: '$LvCliPort'"
-}
 
 function Invoke-DockerCommand {
     param(

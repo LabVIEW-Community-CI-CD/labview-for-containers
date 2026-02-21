@@ -9,6 +9,10 @@ validation machines.
 - Port contract validation for host-native automation.
 - Runner sanity gating before parity/certification workflows.
 
+## Runtime Requirement
+
+- `Tooling/Check-Runner.ps1` requires PowerShell 7.0 or later (`pwsh`).
+
 ## Enforcement Inputs
 
 - Host contract: `Tooling/runner-host-contract.json`
@@ -28,4 +32,3 @@ powershell -NoProfile -NonInteractive -File .\Tooling\Check-Runner.ps1 `
 
 This host parity contract is separate from the container image-contract
 profiles used by certification workflows.
-

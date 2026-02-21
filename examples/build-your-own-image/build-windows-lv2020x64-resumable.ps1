@@ -10,7 +10,7 @@ param(
     [string]$LvYear = '2020',
     [string]$LvCorePackage = 'ni-labview-2020-core-en',
     [string]$LvCliPackage = 'ni-labview-command-line-interface-x86',
-    [string]$LvCliPort = '3363',
+    [ValidateSet('3363')][string]$LvCliPort = '3363',
     [ValidateSet('0', '1')][string]$InstallOptionalHelp = '0',
     [string]$DnsServer = '1.1.1.1',
     [string]$NipmInstallerDownloadUrl = 'https://download.ni.com/support/nipkg/products/ni-package-manager/installers/NIPackageManager26.0.0.exe',
@@ -23,13 +23,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $LvCliPort = [string]$LvCliPort
-if ([string]::IsNullOrWhiteSpace($LvCliPort)) {
-    $LvCliPort = '3363'
-}
 $LvCliPort = $LvCliPort.Trim()
-if ($LvCliPort -ne '3363') {
-    throw "LvCliPort must be set to '3363' for the lv2020x64 image path. Received: '$LvCliPort'"
-}
 if ([string]::IsNullOrWhiteSpace($BaseImage)) {
     throw 'BaseImage cannot be empty.'
 }
@@ -398,14 +392,6 @@ Ensure-NipmInstallerBootstrapper `
     -DownloadUrl $NipmInstallerDownloadUrl `
     -DownloadSha256 $NipmInstallerDownloadSha256 `
     -SourcePath $NipmInstallerSourcePath
-
-$branchName = (& git -C $repoRoot rev-parse --abbrev-ref HEAD).Trim()
-if ($LASTEXITCODE -ne 0) {
-    throw 'Unable to determine the current git branch.'
-}
-if ($branchName -ne 'lv2020x64') {
-    Write-Warning "Expected branch 'lv2020x64'; current branch is '$branchName'. Continuing."
-}
 
 $dockerServerOs = (& docker version --format '{{.Server.Os}}' 2>$null).Trim()
 if ($LASTEXITCODE -ne 0) {

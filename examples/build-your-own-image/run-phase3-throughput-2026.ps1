@@ -2,7 +2,7 @@
 param(
     [string]$IconEditorRepoRoot = '',
     [string]$OutputRelativePath = 'resource/plugins/lv_icon.lvlibp',
-    [string]$LvCliPort = '3363',
+    [ValidateSet('3363')][string]$LvCliPort = '3363',
     [switch]$KeepContainer,
     [string]$LogRoot = 'TestResults/agent-logs'
 )
@@ -38,9 +38,6 @@ if ([string]::IsNullOrWhiteSpace($LvCliPort)) {
     $LvCliPort = '3363'
 }
 $LvCliPort = $LvCliPort.Trim()
-if ($LvCliPort -ne '3363') {
-    throw "LvCliPort must be '3363'. Received: '$LvCliPort'"
-}
 
 if ([string]::IsNullOrWhiteSpace($IconEditorRepoRoot)) {
     $IconEditorRepoRoot = Resolve-DefaultIconEditorRepoRoot -ForkRoot $forkRoot
@@ -55,9 +52,18 @@ if (-not (Test-Path -LiteralPath $projectPath -PathType Leaf)) {
     throw "Project file not found: $projectPath"
 }
 
-$projectText = Get-Content -LiteralPath $projectPath -Raw -ErrorAction Stop
-if ($projectText -notmatch [regex]::Escape($buildSpecName)) {
-    throw "Build specification '$buildSpecName' was not found in $projectPath"
+try {
+    [xml]$projectXml = Get-Content -LiteralPath $projectPath -Raw -ErrorAction Stop
+}
+catch {
+    throw "Unable to parse project XML at $projectPath. $($_.Exception.Message)"
+}
+
+$buildItems = @($projectXml.SelectNodes("//Item[@Type='Build']"))
+$buildSpecNames = @($buildItems | ForEach-Object { [string]$_.Name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+if ($buildSpecNames -notcontains $buildSpecName) {
+    $knownNames = if ($buildSpecNames.Count -gt 0) { $buildSpecNames -join ', ' } else { '<none>' }
+    throw "Build specification '$buildSpecName' was not found in $projectPath. Known build specs: $knownNames"
 }
 
 $dockerServerOs = (& docker version --format '{{.Server.Os}}' 2>$null).Trim()

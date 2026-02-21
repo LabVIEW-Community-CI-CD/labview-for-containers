@@ -58,6 +58,10 @@ jobs:
               echo "outcome=fast_forwarded" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+
+            # Reset local branch before opening a sync PR path.
+            git reset --hard origin/main
+            git clean -fd
           fi
 
           sync_branch="sync/upstream-$(date -u +%Y%m%d-%H%M%S)"

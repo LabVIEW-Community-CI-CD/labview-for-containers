@@ -299,7 +299,7 @@ Write-Host "cert_summary_path=$certSummaryPath"
 Write-Host "cert_classification=$classification"
 Write-Host "promotion_eligible=$promotionEligible"
 
-if ($env:GITHUB_OUTPUT) {
+if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_OUTPUT)) {
     Add-Content -Path $env:GITHUB_OUTPUT -Value ("cert_summary_path={0}" -f $certSummaryPath)
     Add-Content -Path $env:GITHUB_OUTPUT -Value ("cert_classification={0}" -f $classification)
     Add-Content -Path $env:GITHUB_OUTPUT -Value ("promotion_eligible={0}" -f $promotionEligible.ToString().ToLowerInvariant())
