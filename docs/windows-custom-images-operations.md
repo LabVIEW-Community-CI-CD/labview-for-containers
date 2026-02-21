@@ -428,6 +428,12 @@ For `2020-x64-stabilization`, certification may run on hosted lanes for
 diagnostics, but `promotion_eligible` remains `false` unless runner
 fingerprint indicates a real Server 2019 lane.
 
+Profile note:
+
+- `2020-x64-stabilization` enforces listener readiness (`port_listening_before_cli=true`).
+- `2026-x64-throughput` evaluates pass primarily from CLI outcome metrics
+  (`final_exit_code=0`, no `-350000`) and records listener status as evidence.
+
 Comparison procedure (triage discipline):
 
 1. Open previous failing references (`22262096511`, `22262277660`, `22262448572`).
