@@ -47,6 +47,7 @@ $requiredTop = @(
     'generated_utc',
     'contract_profile',
     'image_tag',
+    'runner_target',
     'runner_fingerprint',
     'verification_metrics',
     'classification',
@@ -62,7 +63,30 @@ Assert-StringNotBlank -Value ([string]$summary.schema_version) -Name 'schema_ver
 Assert-StringNotBlank -Value ([string]$summary.generated_utc) -Name 'generated_utc'
 Assert-StringNotBlank -Value ([string]$summary.contract_profile) -Name 'contract_profile'
 Assert-StringNotBlank -Value ([string]$summary.image_tag) -Name 'image_tag'
+Assert-StringNotBlank -Value ([string]$summary.runner_target) -Name 'runner_target'
 Assert-StringNotBlank -Value ([string]$summary.classification) -Name 'classification'
+
+$fingerprint = $summary.runner_fingerprint
+$requiredFingerprint = @(
+    'os_caption',
+    'os_version',
+    'os_build',
+    'docker_server_os',
+    'docker_platform_name',
+    'is_docker_desktop_windows'
+)
+foreach ($name in $requiredFingerprint) {
+    Assert-HasProperty -Object $fingerprint -Name $name
+}
+Assert-StringNotBlank -Value ([string]$fingerprint.os_caption) -Name 'runner_fingerprint.os_caption'
+Assert-StringNotBlank -Value ([string]$fingerprint.os_version) -Name 'runner_fingerprint.os_version'
+Assert-StringNotBlank -Value ([string]$fingerprint.os_build) -Name 'runner_fingerprint.os_build'
+Assert-StringNotBlank -Value ([string]$fingerprint.docker_server_os) -Name 'runner_fingerprint.docker_server_os'
+Assert-StringNotBlank -Value ([string]$fingerprint.docker_platform_name) -Name 'runner_fingerprint.docker_platform_name'
+if ($null -eq $fingerprint.is_docker_desktop_windows -or $fingerprint.is_docker_desktop_windows -isnot [bool]) {
+    $actualType = if ($null -eq $fingerprint.is_docker_desktop_windows) { '<null>' } else { $fingerprint.is_docker_desktop_windows.GetType().FullName }
+    throw "runner_fingerprint.is_docker_desktop_windows must be a boolean. Actual type: $actualType"
+}
 
 if (-not [string]::IsNullOrWhiteSpace($ExpectedContractProfile) -and [string]$summary.contract_profile -ne $ExpectedContractProfile) {
     throw "contract_profile mismatch. expected='$ExpectedContractProfile' actual='$($summary.contract_profile)'"

@@ -38,7 +38,8 @@
         "os_version",
         "os_build",
         "docker_server_os",
-        "is_real_server2019"
+        "docker_platform_name",
+        "is_docker_desktop_windows"
       ],
       "properties": {
         "os_caption": {
@@ -52,6 +53,12 @@
         },
         "docker_server_os": {
           "type": "string"
+        },
+        "docker_platform_name": {
+          "type": "string"
+        },
+        "is_docker_desktop_windows": {
+          "type": "boolean"
         },
         "is_real_server2019": {
           "type": "boolean"
