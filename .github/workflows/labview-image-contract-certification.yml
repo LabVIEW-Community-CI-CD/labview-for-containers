@@ -23,6 +23,7 @@ on:
         type: choice
         options:
           - hosted-2022
+          - self-hosted-docker-desktop-windows
           - self-hosted-server2019
       isolation_mode:
         description: 'Docker isolation mode'
@@ -172,12 +173,11 @@ jobs:
             throw "Certification classification is ${{ steps.classify.outputs.classification }}"
           }
 
-  certify-self-hosted-server2019:
-    if: ${{ inputs.runner_target == 'self-hosted-server2019' }}
+  certify-self-hosted-docker-desktop-windows:
+    if: ${{ inputs.runner_target == 'self-hosted-docker-desktop-windows' || inputs.runner_target == 'self-hosted-server2019' }}
     runs-on:
       - self-hosted
       - windows
-      - server2019
     timeout-minutes: 240
     env:
       LVIE_ENFORCE_DEDICATED_HOST_CONTRACT: '1'
@@ -187,39 +187,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Ensure self-hosted image availability (preflight)
+      - name: Resolve runner target alias
+        id: lane
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $imageTag = '${{ inputs.image_tag }}'.Trim()
-          if ([string]::IsNullOrWhiteSpace($imageTag)) {
-            throw 'workflow input image_tag is empty.'
+          $requested = '${{ inputs.runner_target }}'
+          $effective = $requested
+          $deprecated = 'false'
+          if ($requested -eq 'self-hosted-server2019') {
+            $effective = 'self-hosted-docker-desktop-windows'
+            $deprecated = 'true'
+            Write-Warning "runner_target 'self-hosted-server2019' is deprecated; using '$effective'."
           }
-
-          $dockerServerOs = (& docker version --format '{{.Server.Os}}' 2>$null).Trim()
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Unable to query Docker server mode on self-hosted runner.'
-          }
-          if ($dockerServerOs -ne 'windows') {
-            throw "Self-hosted runner Docker mode must be windows. Current: $dockerServerOs"
-          }
-
-          & docker image inspect $imageTag > $null 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Image already available locally: $imageTag"
-            exit 0
-          }
-
-          Write-Host "Image not present locally, pulling: $imageTag"
-          & docker pull $imageTag
-          if ($LASTEXITCODE -ne 0) {
-            throw "Unable to pull required image: $imageTag"
-          }
-
-          & docker image inspect $imageTag > $null 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            throw "Pulled image could not be inspected: $imageTag"
-          }
+          "requested_runner_target=$requested" >> $env:GITHUB_OUTPUT
+          "effective_runner_target=$effective" >> $env:GITHUB_OUTPUT
+          "deprecated_alias_used=$deprecated" >> $env:GITHUB_OUTPUT
 
       - name: Runner sanity (dedicated host contract)
         uses: ./.github/actions/runner-bootstrap
@@ -230,16 +212,28 @@ jobs:
           required_labview_years: ${{ env.LVIE_REQUIRED_LABVIEW_YEARS }}
           required_cli_major: ${{ env.LVIE_REQUIRED_CLI_MAJOR }}
 
-      - name: Validate real Server 2019 base
+      - name: Validate Docker Desktop Windows policy
+        id: docker_policy
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $os = Get-CimInstance -ClassName Win32_OperatingSystem
-          $caption = [string]$os.Caption
-          $build = [string]$os.BuildNumber
-          if ($caption -notmatch 'Server' -or $build -ne '17763') {
-            throw "Runner must be a real Server 2019 lane for 2020 eligibility. Caption='$caption' Build='$build'"
+          $dockerJson = (& docker version --format '{{json .}}' 2>$null)
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$dockerJson)) {
+            throw 'Unable to query docker version. Ensure Docker Desktop is running.'
           }
+
+          $docker = $dockerJson | ConvertFrom-Json -ErrorAction Stop
+          $serverOs = [string]$docker.Server.Os
+          $platformName = [string]$docker.Server.Platform.Name
+          $isDesktopWindows = ($serverOs -eq 'windows') -and ($platformName -like 'Docker Desktop*')
+
+          if (-not $isDesktopWindows) {
+            throw "Self-hosted policy requires Docker Desktop in Windows mode. Server.Os='$serverOs', Platform.Name='$platformName'"
+          }
+
+          "docker_server_os=$serverOs" >> $env:GITHUB_OUTPUT
+          "docker_platform_name=$platformName" >> $env:GITHUB_OUTPUT
+          "is_docker_desktop_windows=true" >> $env:GITHUB_OUTPUT
 
       - name: Run image contract certification
         id: certify
@@ -253,10 +247,13 @@ jobs:
           & .\examples\build-your-own-image\certify-image-contract.ps1 `
             -ContractProfile '${{ inputs.contract_profile }}' `
             -ImageTag '${{ inputs.image_tag }}' `
-            -RunnerTarget '${{ inputs.runner_target }}' `
+            -RunnerTarget '${{ steps.lane.outputs.effective_runner_target }}' `
+            -ExecutionSurface 'native-host' `
             -IsolationMode '${{ inputs.isolation_mode }}' `
             -MaxCliAttempts ([int]'${{ inputs.max_cli_attempts }}') `
             -RepeatRuns ([int]'${{ inputs.repeat_runs }}') `
+            -NativeLabVIEWPath 'C:\Program Files\National Instruments\LabVIEW 2020\LabVIEW.exe' `
+            -NativeBitness '64' `
             -LogRoot $logRoot
 
       - name: Classify certification result
@@ -286,7 +283,10 @@ jobs:
             "### Image Contract Certification",
             "- Contract profile: ${{ inputs.contract_profile }}",
             "- Image tag: ${{ inputs.image_tag }}",
-            "- Runner lane: self-hosted-server2019",
+            "- Runner lane requested: ${{ steps.lane.outputs.requested_runner_target }}",
+            "- Runner lane effective: ${{ steps.lane.outputs.effective_runner_target }}",
+            "- Alias deprecated used: ${{ steps.lane.outputs.deprecated_alias_used }}",
+            "- Docker policy: os=${{ steps.docker_policy.outputs.docker_server_os }}, platform=${{ steps.docker_policy.outputs.docker_platform_name }}",
             "- Classification: $classification",
             "- Summary path: " + ($(if ([string]::IsNullOrWhiteSpace($summaryPath)) { '<not-found>' } else { $summaryPath }))
           ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append

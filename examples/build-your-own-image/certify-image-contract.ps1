@@ -3,10 +3,14 @@ param(
     [Parameter(Mandatory = $true)][string]$ContractProfile,
     [Parameter(Mandatory = $true)][string]$ImageTag,
     [string]$RunnerTarget = 'hosted-2022',
+    [ValidateSet('container-image', 'native-host')][string]$ExecutionSurface = 'container-image',
     [ValidateSet('process', 'hyperv')][string]$IsolationMode = 'process',
     [ValidateRange(1, 10)][int]$MaxCliAttempts = 2,
     [string]$LogRoot = 'TestResults/agent-logs',
-    [int]$RepeatRuns = 0
+    [int]$RepeatRuns = 0,
+    [string]$NativeLabVIEWPath = '',
+    [string]$NativeLvCliPort = '',
+    [ValidateSet('32', '64')][string]$NativeBitness = '64'
 )
 
 Set-StrictMode -Version Latest
@@ -24,6 +28,19 @@ function Get-RepoRoot {
     return (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 }
 
+function Get-DockerVersionObject {
+    try {
+        $json = (& docker version --format '{{json .}}' 2>$null)
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$json)) {
+            return $null
+        }
+        return ($json | ConvertFrom-Json -ErrorAction Stop)
+    }
+    catch {
+        return $null
+    }
+}
+
 function Get-RunnerFingerprint {
     $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
     $caption = if ($null -ne $os) { [string]$os.Caption } else { '' }
@@ -31,15 +48,23 @@ function Get-RunnerFingerprint {
     $build = if ($null -ne $os) { [string]$os.BuildNumber } else { '' }
     $isRealServer2019 = ($caption -match 'Server') -and ($build -eq '17763')
 
-    $dockerServerOs = 'unknown'
-    try {
-        $dockerServerOs = (& docker version --format '{{.Server.Os}}' 2>$null).Trim()
+    $dockerServerOs = 'unavailable'
+    $dockerPlatformName = 'unavailable'
+    $isDockerDesktopWindows = $false
+
+    $dockerVersion = Get-DockerVersionObject
+    if ($null -ne $dockerVersion) {
+        $dockerServerOs = [string]$dockerVersion.Server.Os
         if ([string]::IsNullOrWhiteSpace($dockerServerOs)) {
             $dockerServerOs = 'unknown'
         }
-    }
-    catch {
-        $dockerServerOs = 'unavailable'
+
+        $dockerPlatformName = [string]$dockerVersion.Server.Platform.Name
+        if ([string]::IsNullOrWhiteSpace($dockerPlatformName)) {
+            $dockerPlatformName = 'unknown'
+        }
+
+        $isDockerDesktopWindows = ($dockerServerOs -eq 'windows') -and ($dockerPlatformName -like 'Docker Desktop*')
     }
 
     return [ordered]@{
@@ -47,6 +72,8 @@ function Get-RunnerFingerprint {
         os_version = $version
         os_build = $build
         docker_server_os = $dockerServerOs
+        docker_platform_name = $dockerPlatformName
+        is_docker_desktop_windows = $isDockerDesktopWindows
         is_real_server2019 = $isRealServer2019
     }
 }
@@ -65,10 +92,59 @@ function Get-RunSummaryPath {
     return $summary.FullName
 }
 
+function Resolve-NativeLvCliPort {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$LvYear,
+        [Parameter(Mandatory = $true)][ValidateSet('32', '64')][string]$Bitness
+    )
+
+    $portContractPath = Join-Path $RepoRoot 'Tooling\labviewcli-port-contract.json'
+    if (-not (Test-Path -LiteralPath $portContractPath -PathType Leaf)) {
+        throw "Native host port contract file not found: $portContractPath"
+    }
+
+    $portContract = Get-Content -LiteralPath $portContractPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if (-not $portContract.PSObject.Properties.Name.Contains('labview_cli_ports')) {
+        throw "Invalid port contract: missing 'labview_cli_ports' in $portContractPath"
+    }
+
+    $yearNode = $portContract.labview_cli_ports.PSObject.Properties[$LvYear]
+    if ($null -eq $yearNode) {
+        throw "Native port contract missing year '$LvYear' in $portContractPath"
+    }
+
+    $bitnessNode = $yearNode.Value.PSObject.Properties[$Bitness]
+    if ($null -eq $bitnessNode) {
+        throw "Native port contract missing bitness '$Bitness' for year '$LvYear' in $portContractPath"
+    }
+
+    return [string]$bitnessNode.Value
+}
+
+function Resolve-NativeLabVIEWPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$LvYear,
+        [Parameter(Mandatory = $true)][ValidateSet('32', '64')][string]$Bitness,
+        [string]$ExplicitPath
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        return $ExplicitPath
+    }
+
+    if ($Bitness -eq '32') {
+        return "C:\Program Files (x86)\National Instruments\LabVIEW $LvYear\LabVIEW.exe"
+    }
+
+    return "C:\Program Files\National Instruments\LabVIEW $LvYear\LabVIEW.exe"
+}
+
 $repoRoot = Get-RepoRoot
 $profilePath = Join-Path $repoRoot 'Tooling\image-contract-profiles.json'
 $schemaPath = Join-Path $repoRoot 'Tooling\image-cert-summary.schema.json'
-$verifierScriptPath = Join-Path $PSScriptRoot 'verify-lv-cli-masscompile-from-image.ps1'
+$containerVerifierScriptPath = Join-Path $PSScriptRoot 'verify-lv-cli-masscompile-from-image.ps1'
+$nativeVerifierScriptPath = Join-Path $PSScriptRoot 'verify-lv-cli-masscompile-native.ps1'
 $statusRoot = Join-Path $repoRoot 'builds\status'
 
 Ensure-Directory -Path $statusRoot
@@ -78,8 +154,11 @@ if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf)) {
     throw "Image certification schema file not found: $schemaPath"
 }
-if (-not (Test-Path -LiteralPath $verifierScriptPath -PathType Leaf)) {
-    throw "Verifier script not found: $verifierScriptPath"
+if ($ExecutionSurface -eq 'container-image' -and -not (Test-Path -LiteralPath $containerVerifierScriptPath -PathType Leaf)) {
+    throw "Container verifier script not found: $containerVerifierScriptPath"
+}
+if ($ExecutionSurface -eq 'native-host' -and -not (Test-Path -LiteralPath $nativeVerifierScriptPath -PathType Leaf)) {
+    throw "Native verifier script not found: $nativeVerifierScriptPath"
 }
 
 $profiles = Get-Content -LiteralPath $profilePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -95,7 +174,10 @@ $profile = $profiles.profiles.$ContractProfile
 $lvYear = [string]$profile.lv_year
 $lvCliPort = [string]$profile.lv_cli_port
 $directoryToCompile = [string]$profile.directory_to_compile
-$requiresRealServer2019 = [bool]$profile.requires_real_server2019
+$requiresDockerDesktopWindows = $false
+if ($profile.PSObject.Properties.Name.Contains('requires_docker_desktop_windows')) {
+    $requiresDockerDesktopWindows = [bool]$profile.requires_docker_desktop_windows
+}
 $requirePortListener = $true
 if ($profile.PSObject.Properties.Name.Contains('require_port_listener')) {
     $requirePortListener = [bool]$profile.require_port_listener
@@ -104,6 +186,20 @@ $profileRepeatRuns = [int]$profile.required_repeat_runs
 $effectiveRepeatRuns = if ($RepeatRuns -gt 0) { [int]$RepeatRuns } else { [int]$profileRepeatRuns }
 if ($effectiveRepeatRuns -lt 1) {
     $effectiveRepeatRuns = 1
+}
+
+$unsupportedNativeProfile = ($ExecutionSurface -eq 'native-host' -and $ContractProfile -ne '2020-x64-stabilization')
+$resolvedNativeLvCliPort = ''
+$resolvedNativeLabVIEWPath = ''
+if ($ExecutionSurface -eq 'native-host') {
+    $resolvedNativeLvCliPort = if ([string]::IsNullOrWhiteSpace($NativeLvCliPort)) {
+        Resolve-NativeLvCliPort -RepoRoot $repoRoot -LvYear $lvYear -Bitness $NativeBitness
+    }
+    else {
+        $NativeLvCliPort.Trim()
+    }
+
+    $resolvedNativeLabVIEWPath = Resolve-NativeLabVIEWPath -LvYear $lvYear -Bitness $NativeBitness -ExplicitPath $NativeLabVIEWPath
 }
 
 $resolvedLogRoot = if ([System.IO.Path]::IsPathRooted($LogRoot)) { $LogRoot } else { Join-Path $repoRoot $LogRoot }
@@ -119,9 +215,22 @@ $sourceLogPaths = New-Object System.Collections.Generic.List[string]
 $runResults = New-Object System.Collections.Generic.List[object]
 $passCount = 0
 $failureCount = 0
+$isSelfHostedRunnerTarget = [string]$RunnerTarget -like 'self-hosted*'
+$executionEnvironmentAllowed = $true
 
-if ($requiresRealServer2019 -and -not $fingerprint.is_real_server2019) {
-    $reasons.Add('Profile requires real Server 2019 lane; current runner fingerprint does not satisfy this requirement.') | Out-Null
+if ($requiresDockerDesktopWindows) {
+    if (-not $isSelfHostedRunnerTarget) {
+        $executionEnvironmentAllowed = $false
+        $reasons.Add("Profile requires a self-hosted Docker Desktop Windows lane. RunnerTarget '$RunnerTarget' is not self-hosted.") | Out-Null
+    }
+    elseif (-not [bool]$fingerprint.is_docker_desktop_windows) {
+        $executionEnvironmentAllowed = $false
+        $reasons.Add("Profile requires Docker Desktop in Windows mode. Detected server_os='$($fingerprint.docker_server_os)' platform='$($fingerprint.docker_platform_name)'.") | Out-Null
+    }
+}
+
+if ($unsupportedNativeProfile) {
+    $reasons.Add("ExecutionSurface 'native-host' is supported only for contract profile '2020-x64-stabilization' in this track.") | Out-Null
 }
 
 for ($index = 1; $index -le $effectiveRepeatRuns; $index++) {
@@ -131,24 +240,39 @@ for ($index = 1; $index -le $effectiveRepeatRuns; $index++) {
 
     $runError = ''
     $runSummaryPath = $null
-    $runSummary = $null
     $runPass = $false
     $runFinalExit = $null
     $runContains350000 = $null
     $runPortListening = $null
 
-    try {
-        & $verifierScriptPath `
-            -ImageTag $ImageTag `
-            -LvYear $lvYear `
-            -LvCliPort $lvCliPort `
-            -DirectoryToCompile $directoryToCompile `
-            -IsolationMode $IsolationMode `
-            -MaxCliAttempts $MaxCliAttempts `
-            -LogRoot $runLogRoot
+    if ($unsupportedNativeProfile) {
+        $runError = "native-host execution does not support contract profile '$ContractProfile'."
     }
-    catch {
-        $runError = $_.Exception.Message
+    else {
+        try {
+            if ($ExecutionSurface -eq 'native-host') {
+                & $nativeVerifierScriptPath `
+                    -LvYear $lvYear `
+                    -LabVIEWPath $resolvedNativeLabVIEWPath `
+                    -LvCliPort $resolvedNativeLvCliPort `
+                    -DirectoryToCompile $directoryToCompile `
+                    -MaxCliAttempts $MaxCliAttempts `
+                    -LogRoot $runLogRoot
+            }
+            else {
+                & $containerVerifierScriptPath `
+                    -ImageTag $ImageTag `
+                    -LvYear $lvYear `
+                    -LvCliPort $lvCliPort `
+                    -DirectoryToCompile $directoryToCompile `
+                    -IsolationMode $IsolationMode `
+                    -MaxCliAttempts $MaxCliAttempts `
+                    -LogRoot $runLogRoot
+            }
+        }
+        catch {
+            $runError = $_.Exception.Message
+        }
     }
 
     $runSummaryPath = Get-RunSummaryPath -RunRoot $runLogRoot
@@ -204,12 +328,26 @@ foreach ($result in $runResults) {
         $allPortListening = $false
     }
     if (-not [string]::IsNullOrWhiteSpace([string]$result.error)) {
-        $hasPreflightOrExecutionError = $true
-        if ([string]::IsNullOrWhiteSpace($firstRunError)) {
-            $firstRunError = [string]$result.error
+        $errorText = [string]$result.error
+        $hasRuntimeSummary = -not [string]::IsNullOrWhiteSpace([string]$result.summary_path)
+        $isRuntimeCliFailure = $hasRuntimeSummary -and (
+            ($result.contains_minus_350000 -eq $true) -or
+            ($result.final_exit_code -ne $null -and $result.final_exit_code -ne 0)
+        )
+
+        if (-not $isRuntimeCliFailure) {
+            $hasPreflightOrExecutionError = $true
+            if ([string]::IsNullOrWhiteSpace($firstRunError)) {
+                $firstRunError = $errorText
+            }
         }
-        if ([string]$result.error -match '(?i)image not found locally|no such image|manifest unknown|pull access denied') {
+
+        if ($errorText -match '(?i)image not found locally|no such image|manifest unknown|pull access denied') {
             $hasMissingImageError = $true
+            $hasPreflightOrExecutionError = $true
+            if ([string]::IsNullOrWhiteSpace($firstRunError)) {
+                $firstRunError = $errorText
+            }
         }
     }
     if ([string]::IsNullOrWhiteSpace([string]$result.summary_path)) {
@@ -218,7 +356,7 @@ foreach ($result in $runResults) {
 }
 
 $classification = 'verifier_execution_error'
-if ($requiresRealServer2019 -and -not $fingerprint.is_real_server2019) {
+if ((-not $executionEnvironmentAllowed) -or $unsupportedNativeProfile) {
     $classification = 'environment_incompatible'
 }
 elseif ($failureCount -eq 0 -and $passCount -eq $effectiveRepeatRuns) {
@@ -243,6 +381,14 @@ elseif ($classification -eq 'port_not_listening') {
 elseif ($classification -eq 'cli_connect_fail') {
     $reasons.Add('At least one run had -350000 or a non-zero final_exit_code.') | Out-Null
 }
+elseif ($classification -eq 'environment_incompatible') {
+    if (-not $executionEnvironmentAllowed) {
+        $reasons.Add("Environment does not satisfy Docker Desktop Windows policy. server_os='$($fingerprint.docker_server_os)' platform='$($fingerprint.docker_platform_name)' runner_target='$RunnerTarget'.") | Out-Null
+    }
+    if ($unsupportedNativeProfile) {
+        $reasons.Add("native-host execution is restricted to profile '2020-x64-stabilization'.") | Out-Null
+    }
+}
 
 if ($classification -eq 'pass' -and -not $requirePortListener -and -not $allPortListening) {
     $reasons.Add('Port listener was not enforced for this profile; pass was determined by CLI outcome metrics.') | Out-Null
@@ -260,7 +406,7 @@ elseif ($classification -eq 'verifier_execution_error') {
 }
 
 $promotionEligible = ($classification -eq 'pass') -and ($passCount -eq $effectiveRepeatRuns)
-if ($requiresRealServer2019 -and -not $fingerprint.is_real_server2019) {
+if ($requiresDockerDesktopWindows -and -not [bool]$fingerprint.is_docker_desktop_windows) {
     $promotionEligible = $false
 }
 
@@ -274,6 +420,7 @@ $summary = [ordered]@{
     contract_profile = $ContractProfile
     image_tag = $ImageTag
     runner_target = $RunnerTarget
+    execution_surface = $ExecutionSurface
     runner_fingerprint = $fingerprint
     verification_metrics = [ordered]@{
         repeat_runs_requested = $effectiveRepeatRuns

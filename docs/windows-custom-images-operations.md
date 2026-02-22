@@ -424,9 +424,14 @@ Manual workflow inputs:
 - `max_cli_attempts`
 - `repeat_runs`
 
-For `2020-x64-stabilization`, certification may run on hosted lanes for
-diagnostics, but `promotion_eligible` remains `false` unless runner
-fingerprint indicates a real Server 2019 lane.
+For `2020-x64-stabilization`, promotion eligibility is tied to self-hosted
+Docker Desktop Windows policy checks (`Server.Os=windows` and
+`Server.Platform.Name` starts with `Docker Desktop`).
+
+Migration note:
+
+- The prior real Server 2019 requirement has been replaced by the Docker
+  Desktop Windows requirement for this policy surface.
 
 Profile note:
 
@@ -448,7 +453,7 @@ Comparison procedure (triage discipline):
 ## 2020 Promotion Freeze and Gate (Deferred)
 
 Promotion remains blocked for `labview-custom-windows:2020q1-windows` until
-one real Server 2019 lane passes two fresh runs with all of:
+one self-hosted Docker Desktop Windows lane passes two fresh runs with all of:
 
 - `final_exit_code=0`
 - `contains_minus_350000=false`

@@ -63,7 +63,7 @@ Run validations in this order and stop at the first failing gate:
 
 ### Track B: 2020 Stabilization
 - Objective: remove non-determinism and satisfy promotion gate.
-- Prefer self-hosted real Server 2019 lane for promotion eligibility.
+- Prefer self-hosted Docker Desktop Windows lane for promotion eligibility.
 - Keep canonical `labview-custom-windows:2020q1-windows` frozen until gate passes.
 
 ## Promotion Guardrail (2020 Canonical Tag)
